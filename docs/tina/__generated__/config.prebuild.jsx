@@ -44,7 +44,7 @@ var config_default = defineConfig({
             template: "doc",
             draft: false,
             pagefind: true
-          }),
+          })
           /**
            * Visual-editing router – tells the admin which live URL
            * corresponds to a given document so it can open the page
@@ -56,12 +56,12 @@ var config_default = defineConfig({
            *   "guides/pages.mdx"       → /guides/pages/
            *   "de/getting-started.mdx" → /de/getting-started/
            */
-          router: ({ document }) => {
-            const path = document._sys?.relativePath ?? document._sys?.filename ?? "";
-            const withoutExt = path.replace(/\.(mdx?|md)$/, "");
-            if (!withoutExt || withoutExt === "index") return "/";
-            return `/${withoutExt}/`;
-          }
+          // router: ({ document }) => {
+          //   const path = document._sys?.relativePath ?? document._sys?.filename ?? "";
+          //   const withoutExt = path.replace(/\.(mdx?|md)$/, "");
+          //   if (!withoutExt || withoutExt === "index") return "/";
+          //   return `/${withoutExt}/`;
+          // },
         },
         fields: [
           // ---------- Core Starlight frontmatter ----------

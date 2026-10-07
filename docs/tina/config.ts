@@ -69,12 +69,12 @@ export default defineConfig({
            *   "guides/pages.mdx"       → /guides/pages/
            *   "de/getting-started.mdx" → /de/getting-started/
            */
-          router: ({ document }) => {
-            const path = document._sys?.relativePath ?? document._sys?.filename ?? "";
-            const withoutExt = path.replace(/\.(mdx?|md)$/, "");
-            if (!withoutExt || withoutExt === "index") return "/";
-            return `/${withoutExt}/`;
-          },
+          // router: ({ document }) => {
+          //   const path = document._sys?.relativePath ?? document._sys?.filename ?? "";
+          //   const withoutExt = path.replace(/\.(mdx?|md)$/, "");
+          //   if (!withoutExt || withoutExt === "index") return "/";
+          //   return `/${withoutExt}/`;
+          // },
         },
         fields: [
           // ---------- Core Starlight frontmatter ----------

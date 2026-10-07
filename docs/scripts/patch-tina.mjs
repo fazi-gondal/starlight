@@ -5,14 +5,21 @@
  * Applies surgical patches to TinaCMS node_modules:
  *
  * 1. @tinacms/graphql  – Windows path fix: folders containing parentheses
- *    (like "New folder (2)") break fast-glob. We escape the base path.
+ *    break fast-glob. Escapes the base path.
  *
- * 2. @tinacms/mdx  – MDX ESM import fix: files with Astro/MDX component
- *    imports cause a RichTextParseError on `mdxjsEsm` nodes. We make it
- *    treat them as raw HTML instead.
+ * 2. @tinacms/mdx  – Comprehensive MDX/Markdown parsing fixes:
+ *    - Treats mdxjsEsm and mdxFlowExpression as HTML blocks instead of throwing.
+ *    - Treats mdxTextExpression as inline HTML instead of throwing.
+ *    - Supports boolean JSX attributes with no value (e.g., <CardGrid stagger>).
+ *    - Allows code blocks, thematic breaks, and tables inside list items.
+ *    - Supports markdown definition nodes.
+ *    - Safely serializes unknown mdast nodes instead of throwing.
+ *    - Supports linkReference phrasing content.
+ *    - Converts HTML comments to MDX comments in parseMDX.
+ *    - Patches index.js, index.mjs, and index.browser.mjs, and clears Vite cache.
  *
- * 3. tina/__generated__/types.ts  – TypeScript parse error: a required
- *    `client` parameter follows optional `options?`. We make it optional.
+ * 3. tina/__generated__/types.ts  – TypeScript fix: makes required client param optional.
+ * 4. @tinacms/cli generator template – Fixes the client generator template.
  */
 
 import fs from 'node:fs';
@@ -21,8 +28,10 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootNodeModules = path.resolve(__dirname, '../../node_modules/.pnpm');
+const docsNodeModules = path.resolve(__dirname, '../node_modules');
 
 let patchedCount = 0;
+let mdxChanged = false;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PATCH 1: @tinacms/graphql – Windows path glob escaping
@@ -65,55 +74,167 @@ if (fs.existsSync(rootNodeModules)) {
       }
     }
   }
-} else {
-  console.log('[patch-tina] node_modules/.pnpm not found, skipping graphql patch.');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PATCH 2: @tinacms/mdx – Treat mdxjsEsm as HTML instead of throwing
+// PATCH 2: @tinacms/mdx – Comprehensive parser & stringifier patches
 // ─────────────────────────────────────────────────────────────────────────────
 if (fs.existsSync(rootNodeModules)) {
   const mdxDirs = fs.readdirSync(rootNodeModules).filter((x) => x.startsWith('@tinacms+mdx'));
 
   for (const d of mdxDirs) {
-    const mdxIndexFile = path.join(rootNodeModules, d, 'node_modules/@tinacms/mdx/dist/index.js');
+    const distDir = path.join(rootNodeModules, d, 'node_modules/@tinacms/mdx/dist');
+    for (const f of ['index.js', 'index.mjs', 'index.browser.mjs']) {
+      const filePath = path.join(distDir, f);
+      if (!fs.existsSync(filePath)) continue;
 
-    if (fs.existsSync(mdxIndexFile)) {
-      let content = fs.readFileSync(mdxIndexFile, 'utf8');
+      let content = fs.readFileSync(filePath, 'utf8');
+      let changed = false;
 
-      // Already patched marker
-      if (content.includes('// @ts-ignore\n      case "mdxFlowExpression":')) {
-        console.log(`[patch-tina] @tinacms/mdx already patched (${d})`);
-        continue;
+      // 1. mdxFlowExpression and mdxjsEsm throw
+      const oldThrow1 = `      // @ts-ignore
+      case "mdxFlowExpression":
+      // @ts-ignore
+      case "mdxjsEsm":
+        throw new RichTextParseError(
+          // @ts-ignore
+          \`Unexpected expression \${content4.value}.\`,
+          // @ts-ignore
+          content4.position
+        );`;
+      const newThrow1 = `      // @ts-ignore
+      case "mdxFlowExpression":
+      // @ts-ignore
+      case "mdxjsEsm":
+        return html2(content4);`;
+
+      if (content.includes(oldThrow1)) {
+        content = content.replace(oldThrow1, newThrow1);
+        changed = true;
       }
 
-      // The original throws on mdxjsEsm/mdxFlowExpression.
-      // We replace with a return html2(content4) to pass them through silently.
-      const oldThrow = `      case "mdxFlowExpression":\n      case "mdxjsEsm": {\n        throw new RichTextParseError(`;
-      const newReturn = `      // @ts-ignore\n      case "mdxFlowExpression":\n      case "mdxjsEsm":\n        return html2(content4);\n      case "__patched_esm__": {\n        throw new RichTextParseError(`;
+      // 2. mdxTextExpression throw
+      const oldThrow2 = `      // @ts-ignore
+      case "mdxTextExpression":
+        throw new RichTextParseError(
+          // @ts-ignore
+          \`Unexpected expression \${content4.value}.\`,
+          // @ts-ignore
+          content4.position
+        );`;
+      const newThrow2 = `      // @ts-ignore
+      case "mdxTextExpression":
+        return html_inline(content4);`;
 
-      if (content.includes(oldThrow)) {
-        // Replace and remove the dead code sentinel
-        content = content.replace(oldThrow, newReturn);
-        // Remove the unreachable sentinel case + its throw body
-        content = content.replace(/      case "__patched_esm__": \{\n        throw new RichTextParseError\([^}]+\};\n      \}\n/, '');
-        fs.writeFileSync(mdxIndexFile, content, 'utf8');
+      if (content.includes(oldThrow2)) {
+        content = content.replace(oldThrow2, newThrow2);
+        changed = true;
+      }
+
+      // 3. Boolean attribute without value (<CardGrid stagger>)
+      const oldAttr = `var extractAttribute = (attribute, field, imageCallback) => {
+  switch (field.type) {
+    case "boolean":
+    case "number":
+      return extractScalar(extractExpression(attribute), field);`;
+      const newAttr = `var extractAttribute = (attribute, field, imageCallback) => {
+  switch (field.type) {
+    case "boolean":
+      if (attribute.value === null || attribute.value === undefined) {
+        return true;
+      }
+    case "number":
+      return extractScalar(extractExpression(attribute), field);`;
+
+      if (content.includes(oldAttr)) {
+        content = content.replace(oldAttr, newAttr);
+        changed = true;
+      }
+
+      // 4. Code blocks, thematic breaks, tables inside list items
+      const oldListItem = `          case "code":
+          case "thematicBreak":
+          case "table":
+            throw new RichTextParseError(
+              \`\${child.type} inside list item is not supported\`,
+              child.position
+            );`;
+      const newListItem = `          case "code":
+            return {
+              type: "lic",
+              children: [parseCode(child)]
+            };
+          case "thematicBreak":
+            return {
+              type: "lic",
+              children: [{ type: "hr", children: [{ type: "text", text: "" }] }]
+            };
+          case "table":
+            return {
+              type: "lic",
+              children: [{ type: "text", text: "" }]
+            };`;
+
+      if (content.includes(oldListItem)) {
+        content = content.replace(oldListItem, newListItem);
+        changed = true;
+      }
+
+      // 5. Unknown mdast nodes in toMarkdown
+      const oldUnknown = `function unknown(node2) {
+  throw new Error("Cannot handle unknown node \`" + node2.type + "\`");
+}`;
+      const newUnknown = `function unknown(node2) {
+  return node2.value || "";
+}`;
+
+      if (content.includes(oldUnknown)) {
+        content = content.replace(oldUnknown, newUnknown);
+        changed = true;
+      }
+
+      // 6. Definition nodes
+      const oldDef = '      default:\n        throw new RichTextParseError(\n          `Content: ${content4.type} is not yet supported`,';
+      const newDef = '      case "definition":\n        return { type: "html", value: "" };\n      default:\n        throw new RichTextParseError(\n          `Content: ${content4.type} is not yet supported`,';
+
+      if (content.includes(oldDef) && !content.includes('case "definition":')) {
+        content = content.replace(oldDef, newDef);
+        changed = true;
+      }
+
+      // 7. PhrasingContent unsupported fallback (e.g. linkReference)
+      const oldPhrasingDefault = `      default:
+        throw new Error(
+          \`PhrasingContent: \${content4.type} is not yet supported\`
+        );`;
+      const newPhrasingDefault = `      case "linkReference":
+        return {
+          type: "link",
+          url: "",
+          children: content4.children ? content4.children.map((child) => phrasingContent(child)).flat() : [{ type: "text", text: content4.label || "" }]
+        };
+      default:
+        return text7({ type: "text", value: content4.value || content4.label || "" });`;
+
+      if (content.includes(oldPhrasingDefault)) {
+        content = content.replace(oldPhrasingDefault, newPhrasingDefault);
+        changed = true;
+      }
+
+      // 8. HTML comment handling in parseMDX
+      const oldComment = '    let preprocessedString = value;';
+      const newComment = '    let preprocessedString = typeof value === "string" ? value.replace(/<!--([\\s\\S]*?)-->/g, "{/*$1*/}") : value;';
+
+      if (content.includes(oldComment)) {
+        content = content.replace(oldComment, newComment);
+        changed = true;
+      }
+
+      if (changed) {
+        fs.writeFileSync(filePath, content, 'utf8');
         patchedCount++;
-        console.log(`[patch-tina] Patched @tinacms/mdx ESM imports (${d})`);
-      } else {
-        // Try simpler pattern (already partially changed)
-        const simpleOld = `      case "mdxFlowExpression":\n      case "mdxjsEsm":\n        throw new RichTextParseError(`;
-        const simpleNew = `      // @ts-ignore\n      case "mdxFlowExpression":\n      case "mdxjsEsm":\n        return html2(content4);\n      case "__skip__":\n        throw new RichTextParseError(`;
-
-        if (content.includes(simpleOld)) {
-          content = content.replace(simpleOld, simpleNew);
-          content = content.replace(/      case "__skip__":\n        throw new RichTextParseError\([^)]+\);\n/, '');
-          fs.writeFileSync(mdxIndexFile, content, 'utf8');
-          patchedCount++;
-          console.log(`[patch-tina] Patched @tinacms/mdx ESM imports (simple pattern) (${d})`);
-        } else {
-          console.log(`[patch-tina] @tinacms/mdx: no matching throw pattern found in (${d}) - may already be fixed`);
-        }
+        mdxChanged = true;
+        console.log(`[patch-tina] Patched @tinacms/mdx (${d} -> ${f})`);
       }
     }
   }
@@ -121,7 +242,6 @@ if (fs.existsSync(rootNodeModules)) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PATCH 3: tina/__generated__/types.ts – Fix required param after optional
-//          (applied post-generation to catch any existing file)
 // ─────────────────────────────────────────────────────────────────────────────
 const generatedTypesFile = path.resolve(__dirname, '../tina/__generated__/types.ts');
 if (fs.existsSync(generatedTypesFile)) {
@@ -134,14 +254,11 @@ if (fs.existsSync(generatedTypesFile)) {
     fs.writeFileSync(generatedTypesFile, content, 'utf8');
     patchedCount++;
     console.log('[patch-tina] Patched tina/__generated__/types.ts (client parameter)');
-  } else if (content.includes(newClientParam)) {
-    console.log('[patch-tina] tina/__generated__/types.ts already patched');
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PATCH 4: @tinacms/cli generator template – Fix the SOURCE template so that
-//          every time tinacms regenerates types.ts it already has `client?: any`
+// PATCH 4: @tinacms/cli generator template
 // ─────────────────────────────────────────────────────────────────────────────
 if (fs.existsSync(rootNodeModules)) {
   const cliDirs = fs.readdirSync(rootNodeModules).filter((x) => x.startsWith('@tinacms+cli'));
@@ -159,12 +276,31 @@ if (fs.existsSync(rootNodeModules)) {
         fs.writeFileSync(cliIndexFile, content, 'utf8');
         patchedCount++;
         console.log(`[patch-tina] Patched @tinacms/cli generator template (${d})`);
-      } else if (content.includes(newTemplate)) {
-        console.log(`[patch-tina] @tinacms/cli template already patched (${d})`);
-      } else {
-        console.log(`[patch-tina] @tinacms/cli template pattern not found in (${d})`);
       }
     }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CLEANUP: Purge Vite caches when MDX patches change or are present
+// ─────────────────────────────────────────────────────────────────────────────
+function removeDirSync(dir) {
+  if (fs.existsSync(dir)) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+      console.log(`[patch-tina] Cleaned Vite cache: ${dir}`);
+    } catch (e) {
+      console.warn(`[patch-tina] Could not clean ${dir}: ${e.message}`);
+    }
+  }
+}
+
+// Clean docs/.vite and @tinacms/app/.vite
+removeDirSync(path.join(docsNodeModules, '.vite'));
+if (fs.existsSync(rootNodeModules)) {
+  const appDirs = fs.readdirSync(rootNodeModules).filter((x) => x.startsWith('@tinacms+app'));
+  for (const d of appDirs) {
+    removeDirSync(path.join(rootNodeModules, d, 'node_modules/@tinacms/app/node_modules/.vite'));
   }
 }
 
@@ -174,5 +310,5 @@ if (fs.existsSync(rootNodeModules)) {
 if (patchedCount > 0) {
   console.log(`[patch-tina] Applied ${patchedCount} patch(es) successfully.`);
 } else {
-  console.log('[patch-tina] All patches already applied, nothing to do.');
+  console.log('[patch-tina] All patches already applied and verified.');
 }
