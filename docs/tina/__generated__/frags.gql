@@ -1,0 +1,81 @@
+fragment DocsParts on Docs {
+  __typename
+  title
+  description
+  slug
+  draft
+  pagefind
+  template
+  editUrl
+  lastUpdated
+  sidebar {
+    __typename
+    label
+    order
+    hidden
+    badge {
+      __typename
+      text
+      variant
+    }
+  }
+  tableOfContents {
+    __typename
+    minHeadingLevel
+    maxHeadingLevel
+  }
+  hero {
+    __typename
+    title
+    tagline
+    image {
+      __typename
+      file
+      alt
+      dark
+      light
+      html
+    }
+    actions {
+      __typename
+      text
+      link
+      variant
+      icon
+    }
+  }
+  banner {
+    __typename
+    content
+  }
+  prev {
+    __typename
+    link
+    label
+  }
+  next {
+    __typename
+    link
+    label
+  }
+  head {
+    __typename
+    tag
+    content
+    attrs {
+      __typename
+      name
+      content
+      property
+      href
+      src
+      defer
+    }
+  }
+  body
+}
+
+fragment I18nParts on I18n {
+  __typename
+  component_preview
+}

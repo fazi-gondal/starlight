@@ -1,0 +1,92 @@
+---
+/**
+ * Standalone Tina visual-editing preview route.
+ *
+ * This page exists so you can test click-to-edit without overriding
+ * Starlight's internal Page.astro. Open any docs page through:
+ *
+ *   /tina-preview/getting-started/
+ *   /tina-preview/guides/pages/
+ *   /tina-preview/de/getting-started/
+ *
+ * In the Tina admin, the collection router points at the real Starlight
+ * URLs. For full in-context editing on those URLs you would also wrap
+ * the Starlight MarkdownContent / PageTitle components (see TINA_CMS.md).
+ */
+import TinaIsland from '@tinacms/astro/TinaIsland.astro';
+import { getDocBySlug } from '../../lib/tina/data';
+
+export const prerender = false;
+
+const slugParam = Astro.params.slug;
+const slug = Array.isArray(slugParam)
+  ? slugParam.join('/')
+  : slugParam ?? 'index';
+
+let doc = null;
+try {
+  const result = await getDocBySlug(slug);
+  doc = result?.data?.docs ?? null;
+} catch (e) {
+  console.error('TINA PREVIEW ERROR:', e);
+}
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{doc?.title ?? 'Tina Preview'} · Starlight + TinaCMS</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, sans-serif;
+        margin: 0;
+        background: #0f0f12;
+        color: #e8e8ed;
+      }
+      .preview-banner {
+        background: #6b21a8;
+        color: white;
+        text-align: center;
+        padding: 0.4rem 1rem;
+        font-size: 0.85rem;
+      }
+      .preview-banner a {
+        color: #e9d5ff;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="preview-banner">
+      TinaCMS visual-editing preview ·
+      <a href={`/admin/index.html#/collections/docs/${slug.replace(/\//g, '~')}`}>Open in admin</a>
+      ·
+      <a href={`/${slug === 'index' ? '' : slug + '/'}`}>View real page</a>
+    </div>
+
+    {/* Primary island – the bridge will re-render this region live */}
+    <TinaIsland
+      name="docsBody"
+      params={{ slug }}
+      primary
+      wrapper={{ tag: 'article', attrs: { class: 'tina-island-docs-body' } }}
+    >
+      {/* Fallback content shown on first paint / when not in edit mode */}
+      {doc ? (
+        <div style="max-width:45rem;margin:2rem auto;padding:0 1.5rem">
+          <h1>{doc.title}</h1>
+          {doc.description && <p style="opacity:0.7">{doc.description}</p>}
+          <div class="sl-markdown-content">
+            <!-- Body is rendered by the island on subsequent updates -->
+            <p style="opacity:0.5;font-style:italic">
+              Open this page inside the Tina admin to enable live click-to-edit.
+              The island will replace this placeholder with the full rich-text body.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <p style="padding:2rem">Document not found for slug: {slug}</p>
+      )}
+    </TinaIsland>
+  </body>
+</html>

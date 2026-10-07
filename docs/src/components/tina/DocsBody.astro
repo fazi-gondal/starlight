@@ -1,0 +1,101 @@
+---
+/**
+ * Island renderer for a Starlight documentation page body.
+ * Used by the Tina visual-editing bridge to re-render on every keystroke.
+ *
+ * Receives the document data (from the Tina query / overlay) and renders
+ * title + rich-text body with click-to-edit markers.
+ */
+import TinaMarkdown from '@tinacms/astro/TinaMarkdown.astro';
+import { tinaField } from '@tinacms/astro';
+
+interface Props {
+  data?: {
+    title?: string;
+    description?: string;
+    body?: any;
+    template?: string;
+    hero?: any;
+    [key: string]: any;
+  } | null;
+}
+
+const { data } = Astro.props;
+
+// Map Starlight MDX components so embeds render correctly inside TinaMarkdown.
+// These are the same components authors insert via the rich-text "Embed" button.
+const components: Record<string, any> = {
+  // Simple passthroughs – Starlight components can be added here once
+  // you import them. For the island we keep a minimal set so the preview
+  // still renders even if full Starlight component tree is heavy.
+  Aside: (props: any) => {
+    const type = props.type || 'note';
+    return (
+      <aside class={`sl-aside sl-aside--${type}`} data-type={type}>
+        {props.title && <p class="sl-aside__title">{props.title}</p>}
+        <div class="sl-aside__content">{props.children}</div>
+      </aside>
+    );
+  },
+  // Additional component renderers can be registered here matching
+  // the templates defined in tina/config.ts
+};
+---
+
+{data ? (
+  <div class="tina-docs-body">
+    {/* Title – clickable in the visual editor */}
+    <h1 data-tina-field={tinaField(data, 'title')}>{data.title}</h1>
+
+    {/* Description */}
+    {data.description && (
+      <p class="description" data-tina-field={tinaField(data, 'description')}>
+        {data.description}
+      </p>
+    )}
+
+    {/* Rich-text body – the main editable region */}
+    <div class="sl-markdown-content" data-tina-field={tinaField(data, 'body')}>
+      <TinaMarkdown content={data.body} components={components} />
+    </div>
+  </div>
+) : (
+  <p>No document data.</p>
+)}
+
+<style>
+  .tina-docs-body {
+    max-width: var(--sl-content-width, 45rem);
+    margin-inline: auto;
+    padding: 1.5rem;
+  }
+  .tina-docs-body h1 {
+    font-size: var(--sl-text-h1, 2.5rem);
+    margin-bottom: 0.5rem;
+  }
+  .tina-docs-body .description {
+    color: var(--sl-color-gray-3, #666);
+    margin-bottom: 1.5rem;
+  }
+  /* Minimal aside styling so previews look reasonable */
+  .sl-aside {
+    border-inline-start: 4px solid var(--sl-color-accent, #6b21a8);
+    padding: 0.75rem 1rem;
+    margin: 1rem 0;
+    background: var(--sl-color-gray-6, #f5f5f5);
+    border-radius: 0.25rem;
+  }
+  .sl-aside--tip {
+    border-color: var(--sl-color-green, #22c55e);
+  }
+  .sl-aside--caution {
+    border-color: var(--sl-color-orange, #f97316);
+  }
+  .sl-aside--danger {
+    border-color: var(--sl-color-red, #ef4444);
+  }
+  .sl-aside__title {
+    font-weight: 600;
+    margin: 0 0 0.25rem;
+  }
+</style>
